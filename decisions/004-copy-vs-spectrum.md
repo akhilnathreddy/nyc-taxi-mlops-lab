@@ -12,11 +12,7 @@ Redshift Spectrum: an external table over `trips/` in the data bucket (external 
 
 ## Why
 
-- Only what passed the gate is queryable. With COPY, a file enters the warehouse only after `schema_contract` passes and `raw_trips` runs. With Spectrum, a file that lands in the bucket is part of the external table immediately, so a bad month is visible to every query before any check has run.
-- Every downstream step (`stg_trips`, the data-quality checks, `zone_hour_stats`, and S2's features) reads the same data several times. With COPY, the S3 read happens once per month. With Spectrum, every query rescans S3 and is billed per byte scanned, and it is slower than reading local, sorted, compressed blocks.
-- Dist and sort keys only apply to tables Redshift stores, so COPY is what makes the dist and sort key decision mean anything.
-- The given `stg_trips.sql` reads `ingest.raw_trips ... where source_file = '{file}'`. COPY fills `source_file` directly; Spectrum would need a view deriving it from the `"$path"` pseudo-column.
-- The cost I accept: the data is stored twice (S3 and Redshift), loading takes time per month, and making the load safe to re-run is my job (the delete-and-insert transaction) rather than something that comes for free.
+I chose COPY because my pipeline repeatedly processes monthly taxi data for analytics and ML. Loading data into Redshift avoids repeated S3 scans and supports safe monthly reruns through transactions. Spectrum avoids data duplication but introduces additional dependencies and changes to the existing staging SQL. COPY is a better fit for my current workload.
 
 ## What would show this was wrong
 

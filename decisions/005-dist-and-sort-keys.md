@@ -16,12 +16,7 @@ Stage: S1 · Date: 2026-11-21 · Author: akhilnathreddy · Drafted by agent: yes
 
 ## Why
 
-- The cluster is one `ra3.large` node with 2 slices. Distribution decides which slice a row lives on; with 2 slices on one node there is almost no network redistribution to save, so a hand-picked dist key buys little. `AUTO` lets Redshift choose (and change) the style as the tables grow, which is the right default at this size.
-- A key on `pickup_zone_id` would also skew: a few zones (Midtown, the airports, the Upper East Side) carry a large share of trips, so one slice would do more of the work. `AUTO` doesn't have that risk.
-- Sort keys are what matter here. Zone maps let Redshift skip whole blocks whose min/max fall outside a filter.
-  - Every statement on `raw_trips` filters on one month's `source_file`: the reload's `delete`, the row count, and `stg_trips`' `select ... where source_file = '{file}'`. Sorting on it means each of those reads only that month's blocks.
-  - `stg_trips` is read by time: per-month checks, the mart, and S2's training windows all filter or group on pickup time, so `pickup_at` keeps those range scans narrow.
-- `taxi_zones` is about 265 rows. `DISTSTYLE ALL` puts a full copy on every slice, so joining it to trips never moves the trip rows. The copy costs nothing at this size.
+I chose `SORTKEY(source_file)` for raw_trips to optimize monthly ingestion and `SORTKEY(pickup_at)` for stg_trips to support time-based analytics. I chose `DISTSTYLE AUTO` because the cluster has only two slices, making manual distribution less beneficial. For the small taxi_zones table, I chose `DISTSTYLE ALL` to improve joins.
 
 ## What would show this was wrong
 

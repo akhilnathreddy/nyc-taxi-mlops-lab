@@ -29,11 +29,7 @@ Making every check blocking (or every check a warning) with one generous thresho
 
 ## Why
 
-- A blocking check has to be one I'd stop the pipeline for. Lost rows, missing pickup times or zones, zone ids that don't exist, a file for the wrong month and a truncated file all mean the mart would be wrong. None of them happened even once in four real months (pickups outside the month: at most 23 rows), so zero, or 0.01% for the month check, costs nothing on real data and catches a shifted COPY or a wrong file, which would fail on nearly every row.
-- Anomalies like negative fares (refunds), zero-distance trips and very long trips are part of real taxi data. Blocking on them would stop good months for ordinary noise (zero distance already swings between 1.3% and 2.4%). Warning thresholds at about 3x the observed maximum stay quiet on real months and fire when a rate actually moves.
-- Null `passenger_count` is the one rising trend: it more than doubled from January to March. A threshold set from January alone (say 5%) would fire every month from March on, and a warning that always fires stops being read. 15% sits above the worst month with room for the trend. It never blocks: `passenger_count` is not a model input.
-- `month_volume` is relative (50% of the median of the other months), not a fixed number of rows, so seasonality and slow drift don't trip it, while a half-empty file still does.
-- The cost I accept: a zero threshold stops a month for a single bad row of those kinds, which means a manual look and a rerun. The warnings rely on someone reading them; nothing stops on them.
+I chose separate blocking and warning checks because not every data issue has the same impact. Critical integrity failures, such as missing required fields, unknown zones or incorrect months, should stop the pipeline. Unusual values should generate warnings without stopping ingestion. This protects data quality while keeping the pipeline operational.
 
 ## What would show this was wrong
 
