@@ -1,0 +1,64 @@
+# CD (S0): after ci succeeds for a push to main, run the new app image on the app host through its
+# self-hosted runner (label lab-app), then smoke-test /version through Traefik.
+# workflow_run, not part of ci.yaml: ci also runs for pull requests, and a self-hosted job must never
+# share a workflow with them. The guard below checks the triggering event and repository, so a fork's
+# PR CI run (even from a branch named main) can't reach the host.
+#
+# Rollback: run this workflow by hand with an earlier sha-<short sha> tag.
+name: cd
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to deploy, e.g. sha-1a2b3c4 (rollback)"
+        required: true
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: cd-app
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' || (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: [self-hosted, lab-app]
+    timeout-minutes: 10
+    env:
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      INPUT_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          # The compose and Traefik files from the commit that was built (main's, for a rollback).
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Image tag
+        run: |
+          tag=${INPUT_TAG:-sha-${HEAD_SHA::7}}
+          [[ $tag =~ ^sha-[0-9a-f]{7}$ ]] || { echo "not a sha-<7 hex> tag: $tag" >&2; exit 1; }
+          echo "IMAGE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Deploy
+        run: |
+          docker compose -f deploy/compose.app.yaml pull
+          docker compose -f deploy/compose.app.yaml up -d --wait
+      - name: Smoke test /version
+        run: |
+          curl -fsS --retry 20 --retry-all-errors --retry-delay 3 http://127.0.0.1/version | tee /dev/stderr |
+            jq -e --arg tag "$IMAGE_TAG" '.image_tag == $tag and (.git_sha | startswith($tag | ltrimstr("sha-")))'
