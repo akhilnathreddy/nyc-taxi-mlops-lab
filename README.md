@@ -8,7 +8,8 @@ A ride-hailing app quotes trip times with a static median. Product wants predict
 | --- | --- | --- |
 | [S0](stages/S0.md) walking skeleton | A push to `main` is tested, built as a `linux/arm64` image on GHCR and deployed to the app host; `/predict` quotes the static median (12.25 min) | ✅ done |
 | [S1](stages/S1.md) data pipeline | A month's trip file landing in the data bucket ends up in Redshift and in the `zone_hour_stats` mart with no one pressing a button; schema drift and bad months never reach the mart | ✅ done (2024-01 to 2024-04 loaded) |
-| S2 onward | Model, serving, operations, assistant | not started: each handout arrives with its `stage-N` tag |
+| [S2](stages/S2.md) model pipeline | `train_model` trains LightGBM on every earlier month, registers it in MLflow, compares it with the champion (or the v1 baseline) on the latest month, and only a version that passes the gate becomes `challenger` | 🟡 pipeline done (version 1 is `challenger`: MAE 3.64 vs 3.96 min); decision record 007 and the colleague's patch open |
+| S3 onward | Serving, operations, assistant | not started: each handout arrives with its `stage-N` tag |
 
 ## Architecture
 
@@ -41,8 +42,12 @@ trips/ in the bucket ──sensor──► trip_files[month] ──schema_contra
                                                                                         │
                                   stg_trips[month] ◄─────────────────────────────────────┘
                                         │ 5 blocking + 6 warning quality checks
+                                        ├──────────────► zone_hour_stats ◄── taxi_zones
                                         ▼
-                                  zone_hour_stats ◄── taxi_zones
+                                  trip_features[month] ──feature_contract (blocks)
+                                        │  train_model (on demand)
+                                        ▼
+  training_set (UNLOAD window + holdout) ─► trained_model (MLflow version) ─► eval_report ──beats_champion (blocks)──► challenger alias
 ```
 
 - **Sensor** `trip_files_sensor`: every 60 s, lists `trips/`; a new file adds its month as a partition and starts `ingest_month`; a replaced file (new ETag) runs again; an unchanged one never does.
@@ -60,6 +65,8 @@ trips/ in the bucket ──sensor──► trip_files[month] ──schema_contra
 | [004](decisions/004-copy-vs-spectrum.md) | COPY vs Spectrum | COPY each month into Redshift |
 | [005](decisions/005-dist-and-sort-keys.md) | Dist and sort keys | `raw_trips` AUTO / `source_file`; `stg_trips` AUTO / `pickup_at`; `taxi_zones` ALL |
 | [006](decisions/006-blocking-vs-warning.md) | Blocking vs warning | Integrity checks block, anomalies warn, thresholds from 2024-01..04 |
+| [008](decisions/008-promotion-metric-and-margin.md) | Promotion metric and margin | MAE ≥ 2% better, no slice > 5% worse, p95 ≤ 25 ms |
+| [009](decisions/009-training-window.md) | Training window | Latest month is the holdout; every earlier month trains |
 
 ## Operating it
 
@@ -74,6 +81,8 @@ aws ssm start-session --target "$(terraform -chdir=infra/live output -raw platfo
   --document-name AWS-StartPortForwardingSession --parameters portNumber=3000,localPortNumber=3000
 
 scripts/dagster-run.sh ingest_month --partition 2024-03 --wait      # reload one month (idempotent)
+scripts/dagster-run.sh train_model --wait                           # train, evaluate, and set challenger if it passes
+aws sagemaker stop-notebook-instance --notebook-instance-name lab   # end of day; a new session doesn't restart it
 
 aws redshift pause-cluster  --cluster-identifier lab                # end of day: storage-only billing
 aws redshift resume-cluster --cluster-identifier lab                # ~3 min; Dagster runs fail until it's back
