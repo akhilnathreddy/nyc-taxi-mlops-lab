@@ -1,25 +1,24 @@
-# 003: Ingress scope: campus/ISP range plus the grader
+# 003: Ingress scope: open to everyone (0.0.0.0/0) on port 80 only
 
 Stage: S0 · Date: 2026-11-21 · Author: akhilnathreddy · Drafted by agent: yes
 
 ## Choice
 
-Port 80 on the app host (Traefik) is open only to my campus/ISP network range `<CIDR: fill in>` and the grader's IP from the instructor, via `ingress_cidrs` in `infra/live/terraform.tfvars` (gitignored). Nothing else on the app host is reachable from the internet; there is no port 22 anywhere.
-
-<!-- Find the range: whois "$(curl -s https://checkip.amazonaws.com)" | grep -iE 'CIDR|inetnum' -->
+Port 80 on the app host (Traefik) is open to the whole internet: `ingress_cidrs = ["0.0.0.0/0"]` in `infra/live/terraform.tfvars` (gitignored). That is the only inbound port from the internet; there is no port 22 anywhere, MLflow, LLM and Postgres admit only other lab security groups, and Dagster stays on loopback behind SSM port forwarding.
 
 ## Rejected alternative
 
-`0.0.0.0/0`: the app open to the whole internet, like a real public API.
+An allowlist: my campus/ISP range (or my own `/32`) plus the grader's `/32`.
 
 ## Why
 
-- Open to everyone, internet scanners and bots find a public IP on port 80 within minutes. That traffic would hit `/predict` and show up in the S5 metrics and SLOs as noise I didn't generate, and it would expose any app bug to anyone. Nobody outside my network and the grader needs this app.
-- A single `/32` for my own IP was the tighter option, but my address changes between campus Wi-Fi and other networks. Each change would lock me out until I edit tfvars and run `terraform apply`, which is exactly the kind of mid-lab outage I want to avoid. The campus range survives IP changes inside that network.
-- Cost I accept: the range is wider than strictly needed (everyone on that network can reach the app), and I'm still locked out off-campus. From elsewhere I can check the app over SSM port forwarding, or add my current `/32` temporarily.
+- Reachability is the requirement for S0: the grader and I must reach `/version` and `/predict` from wherever we are. With an allowlist, every IP change (campus Wi-Fi, home, hotspot) or an address the grader didn't announce means a lockout until I edit tfvars and run `terraform apply`, an outage I cause myself.
+- What I expose is small and stateless: `/predict` quotes a median, `/version` and `/healthz` reveal a commit sha. Traefik only routes the app; there is no admin UI, no Docker socket, no data store behind port 80.
+- It is how the system would really run: a trip-quote API for a ride-hailing app is public by nature.
+- The cost I accept: scanners and bots will find the public IP within minutes. Their requests reach `/predict` and will show up in the S5 metrics and SLOs as traffic I didn't generate, and any bug in the app is reachable by anyone. I'll have to separate that noise (by route and status in the metrics, or by looking at Traefik logs) rather than rely on the network to keep it out.
 
 ## What would show this was wrong
 
-- Requests in the app's metrics or Traefik logs from addresses I can't account for inside the range.
-- The grader (or I) can't reach `/version` because an address isn't in the list, e.g. the campus network uses more than one public range or changes provider.
-- A later stage needs a caller outside this list (a webhook, a demo audience), which would force a decision between widening and putting auth in front.
+- Unknown traffic distorting my S5 SLOs or error budget enough that I can't tell real regressions from scanner noise.
+- Load from outside (scans, floods) making the app host slow or the `/predict` latency SLO fail.
+- A later stage puts something sensitive behind port 80 (the S7 assistant, anything with data or a token). That would force a choice between narrowing ingress and putting authentication in front.
