@@ -34,7 +34,7 @@ WINDOW_MONTHS: int | None = None
 MIN_MAE_GAIN = 0.02
 MAX_SLICE_LOSS = 0.05
 SLICES = ("airport", "manhattan", "outer", "night")
-P95_LATENCY_BUDGET_MS: float | None = None  # not decided yet: until it is, the gate fails closed
+P95_LATENCY_BUDGET_MS: float | None = 25.0  # the model's share of /predict; None makes the gate fail closed
 
 COLUMNS = "pickup_zone_id, dropoff_zone_id, pickup_hour, pickup_dow, duration_min"
 
