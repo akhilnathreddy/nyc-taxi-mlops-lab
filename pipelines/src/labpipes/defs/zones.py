@@ -11,7 +11,7 @@ def taxi_zones(redshift: RedshiftData, data_bucket: DataBucket) -> dg.Materializ
     redshift.execute(
         "create schema if not exists ingest",
         "create table if not exists ingest.taxi_zones ("
-        "location_id integer not null, borough varchar(32), zone varchar(64), service_zone varchar(32))",
+        "location_id integer not null, borough varchar(32), zone varchar(64), service_zone varchar(32)) diststyle all",
         "delete from ingest.taxi_zones",
         f"copy ingest.taxi_zones from '{data_bucket.zones_uri()}' iam_role default format as csv ignoreheader 1",
     )
