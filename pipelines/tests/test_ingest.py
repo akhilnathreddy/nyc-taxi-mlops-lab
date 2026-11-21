@@ -4,13 +4,17 @@ import json
 
 import dagster as dg
 import pytest
-from fakes import LOG, fake_bucket, fake_redshift, schema_2023, schema_2025
+from fakes import LOG, FakeRedshift, fake_bucket, fake_redshift, schema_2023, schema_2025
 
 from labpipes.contracts import trips_schema
+from labpipes.defs import quality
+from labpipes.defs.marts import zone_hour_stats
 from labpipes.defs.raw_trips import raw_trips
 from labpipes.defs.schema_check import schema_contract
-from labpipes.defs.sensor import trip_files_sensor
+from labpipes.defs.sensor import ingest_job, trip_files_sensor
+from labpipes.defs.staging import stg_trips
 from labpipes.defs.trip_files import trip_files
+from labpipes.defs.zones import taxi_zones
 
 
 def run_month(month, columns):
@@ -64,3 +68,48 @@ def test_sensor_runs_new_and_replaced_files_once():
         assert tick({"2024-01": ("a", schema), "2024-02": ("b", schema)}, cursor)[0] == []
         runs, cursor = tick({"2024-01": ("a", schema), "2024-02": ("c", schema)}, cursor)
         assert runs == ["2024-02:c"] and json.loads(cursor) == {"2024-01": "a", "2024-02": "c"}
+
+
+class QualityRedshift(FakeRedshift):
+    """Answers the quality checks' queries: `failing` names the one check whose condition matches rows."""
+
+    failing: str = ""
+
+    def query(self, sql: str) -> list[dict]:
+        LOG.append(sql)
+        if "group by trip_month" in sql:
+            return [{"trip_month": "2024-01", "n": 1000}, {"trip_month": "2024-02", "n": 1000}]
+        if "sum(n - 1)" in sql:
+            return [{"dups": 0, "rows": 1000}]
+        if "sum(case when" in sql:
+            spec = next(s for s in quality.RATE_CHECKS if s.bad in sql)
+            return [{"rows": 1000, "bad": 500 if spec.name == self.failing else 0}]
+        return super().query(sql)
+
+
+def run_ingest(failing):
+    with dg.instance_for_test() as instance:
+        instance.add_dynamic_partitions("trip_months", ["2024-02"])
+        redshift = QualityRedshift(cluster_id="lab", database="lab", db_user="labadmin", rows=3, failing=failing)
+        LOG.clear()
+        result = dg.Definitions(
+            assets=[trip_files, raw_trips, stg_trips, zone_hour_stats, taxi_zones],
+            asset_checks=[schema_contract, *quality.rate_checks, quality.row_count_matches_file,
+                          quality.month_volume, quality.duplicate_trips],
+            jobs=[ingest_job],
+            resources={"redshift": redshift, "data_bucket": fake_bucket({"2024-02": ("e", trips_schema())})},
+        ).resolve_job_def("ingest_job").execute_in_process(partition_key="2024-02", instance=instance, raise_on_error=False)
+        return {e.event_specific_data.materialization.asset_key.to_user_string() for e in result.get_asset_materialization_events()}
+
+
+def test_clean_month_reaches_the_mart():
+    assert "zone_hour_stats" in run_ingest(failing="")
+
+
+def test_blocking_quality_failure_keeps_the_month_out_of_the_mart():
+    built = run_ingest(failing="required_fields")
+    assert "stg_trips" in built and "zone_hour_stats" not in built
+
+
+def test_warning_does_not_block():
+    assert "zone_hour_stats" in run_ingest(failing="zero_distance")

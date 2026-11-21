@@ -17,7 +17,6 @@ from ..resources import DataBucket
 ingest_job = dg.define_asset_job(
     "ingest_job",
     selection=dg.AssetSelection.assets("trip_files").downstream() & dg.AssetSelection.assets("zone_hour_stats").upstream(),
-    partitions_def=trip_months,
 )
 
 
