@@ -12,11 +12,13 @@ import dagster as dg
 from ..partitions import trip_months
 from ..resources import DataBucket
 
-# trip_files and everything between it and the mart, with their checks: a month that fails a blocking
-# check never reaches zone_hour_stats. Selected by graph, not by name, so S2's trip_features stays out.
+# trip_files and everything between it and the mart and the month's features, with their checks: a
+# month that fails a blocking check reaches neither zone_hour_stats nor trip_features. Training stays out
+# (train_model, training.py): it spans months and runs when you choose.
 ingest_month = dg.define_asset_job(
     "ingest_month",
-    selection=dg.AssetSelection.assets("trip_files").downstream() & dg.AssetSelection.assets("zone_hour_stats").upstream(),
+    selection=dg.AssetSelection.assets("trip_files").downstream()
+    & dg.AssetSelection.assets("zone_hour_stats", "trip_features").upstream(),
 )
 
 

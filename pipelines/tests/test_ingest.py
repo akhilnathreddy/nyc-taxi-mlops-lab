@@ -1,4 +1,4 @@
-"""S1: the schema gate, the idempotent load and the sensor, against the fakes."""
+"""S1-S2: the schema gate, the idempotent load, the sensor and the ingest job, against the fakes."""
 
 import json
 
@@ -6,8 +6,10 @@ import dagster as dg
 import pytest
 from fakes import LOG, FakeRedshift, fake_bucket, fake_redshift, schema_2023, schema_2025
 
-from labpipes.contracts import trips_schema
+from labpipes.contracts import features_contract, trips_schema
 from labpipes.defs import quality
+from labpipes.defs.feature_check import feature_contract
+from labpipes.defs.features import trip_features
 from labpipes.defs.marts import zone_hour_stats
 from labpipes.defs.raw_trips import raw_trips
 from labpipes.defs.schema_check import schema_contract
@@ -77,6 +79,12 @@ class QualityRedshift(FakeRedshift):
 
     def query(self, sql: str) -> list[dict]:
         LOG.append(sql)
+        if "information_schema.columns" in sql:  # feature_contract: the table as the contract has it
+            return [{"column_name": c["name"], "data_type": "character" if c["type"].startswith("char") else c["type"],
+                     "character_maximum_length": 7 if c["type"].startswith("char") else None}
+                    for c in [*features_contract()["keys"], *features_contract()["inputs"], features_contract()["label"]]]
+        if "from staging.trip_features where" in sql and "sum(case when" in sql:
+            return [{c["name"]: 0 for c in [*features_contract()["inputs"], features_contract()["label"]]}]
         if "group by trip_month" in sql:
             return [{"trip_month": "2024-01", "n": 1000}, {"trip_month": "2024-02", "n": 1000}]
         if "sum(n - 1)" in sql:
@@ -93,22 +101,22 @@ def run_ingest(failing):
         redshift = QualityRedshift(cluster_id="lab", database="lab", db_user="labadmin", rows=3, failing=failing)
         LOG.clear()
         result = dg.Definitions(
-            assets=[trip_files, raw_trips, stg_trips, zone_hour_stats, taxi_zones],
+            assets=[trip_files, raw_trips, stg_trips, zone_hour_stats, taxi_zones, trip_features],
             asset_checks=[schema_contract, *quality.rate_checks, quality.row_count_matches_file,
-                          quality.month_volume, quality.duplicate_trips],
+                          quality.month_volume, quality.duplicate_trips, feature_contract],
             jobs=[ingest_month],
             resources={"redshift": redshift, "data_bucket": fake_bucket({"2024-02": ("e", trips_schema())})},
         ).resolve_job_def("ingest_month").execute_in_process(partition_key="2024-02", instance=instance, raise_on_error=False)
         return {e.event_specific_data.materialization.asset_key.to_user_string() for e in result.get_asset_materialization_events()}
 
 
-def test_clean_month_reaches_the_mart():
-    assert "zone_hour_stats" in run_ingest(failing="")
+def test_clean_month_reaches_the_mart_and_the_features():
+    assert {"zone_hour_stats", "trip_features"} <= run_ingest(failing="")
 
 
-def test_blocking_quality_failure_keeps_the_month_out_of_the_mart():
+def test_blocking_quality_failure_keeps_the_month_out_of_the_mart_and_the_features():
     built = run_ingest(failing="required_fields")
-    assert "stg_trips" in built and "zone_hour_stats" not in built
+    assert "stg_trips" in built and not {"zone_hour_stats", "trip_features"} & built
 
 
 def test_warning_does_not_block():
