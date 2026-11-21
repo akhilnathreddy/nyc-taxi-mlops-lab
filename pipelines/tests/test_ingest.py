@@ -11,7 +11,7 @@ from labpipes.defs import quality
 from labpipes.defs.marts import zone_hour_stats
 from labpipes.defs.raw_trips import raw_trips
 from labpipes.defs.schema_check import schema_contract
-from labpipes.defs.sensor import ingest_job, trip_files_sensor
+from labpipes.defs.sensor import ingest_month, trip_files_sensor
 from labpipes.defs.staging import stg_trips
 from labpipes.defs.trip_files import trip_files
 from labpipes.defs.zones import taxi_zones
@@ -96,9 +96,9 @@ def run_ingest(failing):
             assets=[trip_files, raw_trips, stg_trips, zone_hour_stats, taxi_zones],
             asset_checks=[schema_contract, *quality.rate_checks, quality.row_count_matches_file,
                           quality.month_volume, quality.duplicate_trips],
-            jobs=[ingest_job],
+            jobs=[ingest_month],
             resources={"redshift": redshift, "data_bucket": fake_bucket({"2024-02": ("e", trips_schema())})},
-        ).resolve_job_def("ingest_job").execute_in_process(partition_key="2024-02", instance=instance, raise_on_error=False)
+        ).resolve_job_def("ingest_month").execute_in_process(partition_key="2024-02", instance=instance, raise_on_error=False)
         return {e.event_specific_data.materialization.asset_key.to_user_string() for e in result.get_asset_materialization_events()}
 
 
