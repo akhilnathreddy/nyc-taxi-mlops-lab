@@ -14,4 +14,6 @@
 - `compose.observability.yaml` (S5): Alloy on any host (`LAB_HOST=app|platform`), plus a one-shot container that copies `lab/grafana` from Secrets Manager. Deployed by `.github/workflows/observability.yaml`; config in `observability/`.
 - `web.sh`: the app host's primitives (`prepare`, `live`, `tag`, `smoke`, `switch`, `serving-weights`, `reload`, `status`). Your CD and promotion workflow call them; they decide when.
 
+**S3 as built.** `cd.yaml` calls `web.sh prepare`, reads `web.sh live`, deploys the new tag to the other colour (`compose.web.yaml`, the live colour's tag unchanged), checks it (`--wait` on the Docker health check, `/healthz` and `web.sh smoke` pinned with `X-Lab-Color`) and then `web.sh switch`es; `rollback.yaml` smoke-tests and switches back with no deploy; `promote.yaml` moves `champion` with `promote.py` (run inside the serving image) and calls `web.sh reload champion`. See [decisions 010 and 011](../decisions/) and the [rollback runbook](../runbooks/001-rollback.md).
+
 Local run: `docker build -t local/app:dev app && IMAGE_PREFIX=local IMAGE_TAG=dev HTTP_PORT=8080 docker compose -f deploy/compose.app.yaml up -d --wait`

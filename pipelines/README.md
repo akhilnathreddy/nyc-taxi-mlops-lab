@@ -20,8 +20,10 @@ trips/ in the bucket --sensor--> trip_files[month] --(schema_contract, blocking)
 | Models: v1 baseline, v2 LightGBM, the zone-pair distance lookup, evaluation | `src/tripmodel/` | given (S2) |
 | `trip_features`; resources `ArtifactBucket`, `MlflowTracking` | `defs/features.py`, `resources.py` | given (S2) |
 | `feature_contract` check; `training_set`, `trained_model`, `eval_report`, the `beats_champion` gate, `challenger` | `defs/feature_check.py`, `training.py` | built in S2 |
+| Resources `WikiApi`, `LlmEmbed`, `RagStore`; `wiki.py` (ETags, Retry-After), `chunking.py` | `resources.py`, `wiki.py`, `chunking.py` | given (S6) |
+| `wiki_pages`, `wiki_chunks`, `wiki_embeddings`, the `every_chunk_embedded` check, `ingest_wiki` and its daily schedule | `defs/rag.py` | built in S6 |
 
-S6 adds the `wiki_*` assets. Jobs: `ingest_month` (the sensor's, one month to the mart) and `train_model` (window to challenger); start either from the UI or `scripts/dagster-run.sh`.
+Jobs: `ingest_month` (the sensor's, one month to the mart), `train_model` (window to challenger) and `ingest_wiki` (wiki to vectors, daily at 05:00 UTC); start any of them from the UI or `scripts/dagster-run.sh`.
 
 **Tests:** `make test-pipelines` (fake Redshift and S3, no AWS). **Image:** `docker build -f pipelines/Dockerfile .` from the repo root (it reads `contracts/`). **Runtime:** `deploy/compose.platform.yaml` on the platform host; `dagster.yaml` keeps run storage in the `dagster` database on RDS, runs two at a time, and lets one Redshift-writing step run at a time (pool `redshift`).
 
@@ -51,3 +53,16 @@ S6 adds the `wiki_*` assets. Jobs: `ingest_month` (the sensor's, one month to th
 **Tests.** `tests/test_ingest.py`: a contract file is copied; changed types and an appended column block the COPY; a reload replaces the month in one transaction; the sensor runs new and replaced files once; a blocking quality failure keeps the month out of the mart and a warning doesn't.
 
 **Reload a month** (idempotent): `scripts/dagster-run.sh ingest_month --partition 2024-03 --wait`, or Materialize in the UI.
+
+## S6 as built
+
+**Tables** in the `rag` database on RDS (schema `rag`): `pages` (each published page's last ETag and body, plus which ETag and chunk settings its chunks came from) and `chunks` (id = `Chunk.content_hash(page_id)`, `embedding vector(768)`, NULL until embedded).
+
+| Asset | Does | Metadata that proves it |
+| --- | --- | --- |
+| `wiki_pages` | Lists the pages, then fetches each one with its stored ETag (`If-None-Match`): an unchanged page is a 304 with no body. Unpublished pages are deleted with their chunks | `pages_listed`, `pages_fetched`, `pages_unchanged`, `pages_removed` |
+| `wiki_chunks` | Re-chunks only pages whose ETag or chunk settings changed (256 tokens, no overlap: [decision 015](../decisions/015-chunking-and-top-k.md)); unchanged text keeps its id, so its vector | `pages_chunked`, `chunks_added`, `chunks_removed`, `chunks_total` |
+| `wiki_embeddings` | Embeds only chunks without a vector (`search_document: ` prefix, added by `LlmEmbed`), then makes sure the IVFFlat index exists ([decision 016](../decisions/016-hnsw-or-ivfflat.md)) | `chunks_embedded`, `chunks_with_vector` |
+| `every_chunk_embedded` (blocking) | At least one chunk, and none without a vector | `chunks_missing_vector` |
+
+First run: 16 pages fetched, 16 chunks added and embedded. Second run: 16 unchanged (304), 0 chunked, 0 embedded. **Tests:** `tests/test_rag.py` (unchanged chunks keep their ids, the decisions fail closed when unset, the job covers the three assets).
