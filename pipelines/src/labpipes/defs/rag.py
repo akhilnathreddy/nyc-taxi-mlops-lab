@@ -28,12 +28,15 @@ from labpipes.resources import LlmEmbed, RagStore, WikiApi
 
 # Decision 015: chunk size and overlap, in estimated tokens (chunking.estimate_tokens). None fails closed:
 # wiki_chunks refuses to run until you've chosen.
-CHUNK_MAX_TOKENS: int | None = None
-CHUNK_OVERLAP_TOKENS: int | None = None
+CHUNK_MAX_TOKENS: int | None = 256  # every page (62-181 tokens today) is one chunk
+CHUNK_OVERLAP_TOKENS: int | None = 0  # nothing is split today, so overlap would only repeat text
 
 # Decision 016: "hnsw" or "ivfflat". None fails closed: wiki_embeddings refuses to build an index.
-VECTOR_INDEX: str | None = None
-IVFFLAT_LISTS: int | None = None  # ivfflat only: how many lists (clusters) to build
+VECTOR_INDEX: str | None = "ivfflat"
+# ivfflat only: how many lists (clusters). pgvector's guidance is rows / 1000 up to 1M rows, at least 1:
+# 16 chunks today gives 1, so every query scans every vector (exact). The index is built once, from the
+# vectors present at the time; rebuild it (drop it and rerun) when the wiki grows by orders of magnitude.
+IVFFLAT_LISTS: int | None = 1
 
 DIMENSIONS = 768  # nomic-embed-text-v1.5; never change without re-embedding every chunk
 

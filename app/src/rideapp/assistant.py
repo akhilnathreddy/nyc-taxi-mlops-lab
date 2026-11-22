@@ -114,7 +114,7 @@ async def connect() -> psycopg.AsyncConnection:
                                                  password=s["password"], dbname="rag", autocommit=True, connect_timeout=5)
 
 
-TOP_K = 0  # decision 015: how many chunks go into the prompt (0: no retrieval yet)
+TOP_K = 3  # decision 015: how many chunks go into the prompt (~11 s of prompt reading each on the LLM host)
 
 # Cosine distance (<=>), the operator the vector index is built for (pipelines' rag.py, decision 016).
 # score = 1 - distance: cosine similarity, higher is closer (contracts/assistant-openapi.yaml).
