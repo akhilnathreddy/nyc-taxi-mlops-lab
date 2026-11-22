@@ -15,3 +15,6 @@ One record per decision point, from [000-template.md](000-template.md): the choi
 | [009](009-training-window.md) | S2 | Training window | Latest month is the holdout; every earlier month trains |
 | [010](010-load-vs-reload.md) | S3 | Load at start-up or reload on alias change | Reload in place, called by the approval-gated `promote.yaml`; any pipeline-evaluated version can be promoted |
 | [011](011-blue-green-switch-trigger.md) | S3 | What triggers the blue-green switch | Automatic, after the Docker health check, `/healthz` through Traefik and the smoke test pass |
+| 012 | S4 | What to automate in a restore | *to write* |
+| [013](013-slo-targets.md) | S5 | SLO targets | 99% each: /predict without 5xx, under 250 ms, from a model (not the fallback); multi-window burn-rate pages |
+| [014](014-series-budget.md) | S5 | Series budget | Lean keep list per source, no per-deploy labels; under 2,000 active series (426 after 3 deploys) |
