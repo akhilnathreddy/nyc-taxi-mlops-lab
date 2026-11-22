@@ -74,3 +74,11 @@ module "wiki_secret" {
   name        = local.runtime.secrets.wiki.name
   description = "Wiki URL and token for the support assistant (keys: url, token)"
 }
+
+# S5: Grafana Cloud remote write for Alloy (deploy/compose.observability.yaml copies it on each host).
+# Value put from the laptop, never through Terraform or GitHub.
+module "grafana_secret" {
+  source      = "../modules/secret"
+  name        = "lab/grafana"
+  description = "Grafana Cloud Prometheus remote write for Alloy (keys: url, user, token)"
+}
