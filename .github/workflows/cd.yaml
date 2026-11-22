@@ -1,10 +1,19 @@
-# CD (S0): after ci succeeds for a push to main, run the new app image on the app host through its
-# self-hosted runner (label lab-app), then smoke-test /version through Traefik.
+# CD (S3: blue-green). After ci succeeds for a push to main, deploy the new app image to the idle colour
+# on the app host (self-hosted runner, label lab-app), check it, and switch traffic to it automatically if
+# every check passes. The previous colour keeps running untouched, so rollback.yaml can switch back
+# without deploying anything. Which colour is live is kept in the lab-traefik volume (deploy/web.sh), not
+# in this checkout.
+#
+# Checks before the switch (decisions/011): the container's own Docker health check (compose --wait), the
+# colour's /healthz through Traefik, then deploy/web.sh smoke (/version on this commit's sha and tag,
+# /predict answering). Any failure stops the job before the switch: riders stay on the live colour.
+#
 # workflow_run, not part of ci.yaml: ci also runs for pull requests, and a self-hosted job must never
 # share a workflow with them. The guard below checks the triggering event and repository, so a fork's
 # PR CI run (even from a branch named main) can't reach the host.
 #
-# Rollback: run this workflow by hand with an earlier sha-<short sha> tag.
+# Run by hand with a tag to put an earlier image on the idle colour (it goes through the same checks).
+# To go back to the colour that was live before, run rollback.yaml instead: no deploy, just a switch.
 name: cd
 
 on:
@@ -15,13 +24,14 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Image tag to deploy, e.g. sha-1a2b3c4 (rollback)"
+        description: "Image tag to deploy to the idle colour, e.g. sha-1a2b3c4"
         required: true
 
 permissions:
   contents: read
   packages: read
 
+# Shared with rollback.yaml and promote.yaml: one change to the app host at a time.
 concurrency:
   group: cd-app
   cancel-in-progress: false
@@ -34,31 +44,76 @@ jobs:
         github.event.workflow_run.event == 'push' &&
         github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: [self-hosted, lab-app]
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       INPUT_TAG: ${{ inputs.tag }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          # The compose and Traefik files from the commit that was built (main's, for a rollback).
+          # The compose and Traefik files from the commit that was built (main's, for a hand-run deploy).
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
       - name: Image tag
         run: |
           tag=${INPUT_TAG:-sha-${HEAD_SHA::7}}
           [[ $tag =~ ^sha-[0-9a-f]{7}$ ]] || { echo "not a sha-<7 hex> tag: $tag" >&2; exit 1; }
           echo "IMAGE_TAG=$tag" >> "$GITHUB_ENV"
           echo "IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - uses: docker/login-action@v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Deploy
+
+      - name: Prepare Traefik and pick the idle colour
+        # The first run with this stack replaces S0's Traefik and app: about 15 s without an app, once.
         run: |
-          docker compose -f deploy/compose.app.yaml pull
-          docker compose -f deploy/compose.app.yaml up -d --wait
-      - name: Smoke test /version
+          deploy/web.sh prepare
+          live=$(deploy/web.sh live)
+          idle=$([[ $live == blue ]] && echo green || echo blue)
+          echo "LIVE=$live" >> "$GITHUB_ENV"
+          echo "IDLE=$idle" >> "$GITHUB_ENV"
+          # Compose reads both colours' tags: keep the live one on the image it runs now.
+          if [[ $live != none ]]; then
+            echo "${live^^}_TAG=$(deploy/web.sh tag "$live")" >> "$GITHUB_ENV"
+          fi
+          echo "${idle^^}_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+          echo "live: $live, deploying $IMAGE_TAG to $idle"
+
+      - name: Deploy to the idle colour
+        # --wait: up only returns once the container's Docker health check (/healthz) passes.
+        # --remove-orphans: drops S0's single `app` container on the first run; never touches the live colour.
         run: |
-          curl -fsS --retry 20 --retry-all-errors --retry-delay 3 http://127.0.0.1/version | tee /dev/stderr |
+          docker compose -f deploy/compose.web.yaml pull "app-$IDLE"
+          docker compose -f deploy/compose.web.yaml up -d --wait --no-deps --remove-orphans "app-$IDLE"
+
+      - name: Health check through Traefik
+        run: |
+          curl -fsS --retry 20 --retry-all-errors --retry-delay 3 -H "X-Lab-Color: $IDLE" http://127.0.0.1/healthz
+
+      - name: Smoke test the idle colour
+        run: |
+          deploy/web.sh smoke "$IDLE" ${HEAD_SHA:+"$HEAD_SHA"}
+          curl -fsS -H "X-Lab-Color: $IDLE" http://127.0.0.1/version |
             jq -e --arg tag "$IMAGE_TAG" '.image_tag == $tag and (.git_sha | startswith($tag | ltrimstr("sha-")))'
+
+      - name: Switch traffic
+        run: deploy/web.sh switch "$IDLE"
+
+      - name: Riders get the new colour
+        # Traefik picks up the new weights from its watched volume within a second or two.
+        run: |
+          for _ in $(seq 20); do
+            if curl -fsS http://127.0.0.1/version | jq -e --arg tag "$IMAGE_TAG" '.image_tag == $tag'; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "live traffic still not on $IMAGE_TAG after the switch" >&2
+          exit 1
+
+      - name: Status
+        if: always()
+        run: deploy/web.sh status | tee -a "$GITHUB_STEP_SUMMARY"

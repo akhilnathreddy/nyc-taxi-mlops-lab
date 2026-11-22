@@ -1,0 +1,58 @@
+# Rollback (S3): send app traffic back to the other colour, which still runs the previous version.
+# Nothing is built or deployed: smoke the other colour, switch, check riders get it, and time the switch.
+# Run it by hand: gh workflow run rollback.yaml
+#
+# workflow_dispatch only, so a fork's pull request can never reach the self-hosted runner.
+name: rollback
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Shared with cd.yaml and promote.yaml: one change to the app host at a time.
+concurrency:
+  group: cd-app
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: [self-hosted, lab-app]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Pick the colour to go back to
+        run: |
+          live=$(deploy/web.sh live)
+          [[ $live =~ ^(blue|green)$ ]] || { echo "no live colour yet (live: $live): nothing to roll back to" >&2; exit 1; }
+          prev=$([[ $live == blue ]] && echo green || echo blue)
+          tag=$(deploy/web.sh tag "$prev")
+          [[ $tag != none ]] || { echo "$prev isn't running an app: nothing to roll back to" >&2; exit 1; }
+          echo "LIVE=$live" >> "$GITHUB_ENV"
+          echo "PREV=$prev" >> "$GITHUB_ENV"
+          echo "PREV_TAG=$tag" >> "$GITHUB_ENV"
+          echo "live: $live ($(deploy/web.sh tag "$live")), rolling back to $prev ($tag)"
+
+      - name: Smoke test the previous colour
+        run: deploy/web.sh smoke "$PREV"
+
+      - name: Switch and time it
+        run: |
+          start=$(date +%s%N)
+          deploy/web.sh switch "$PREV"
+          for _ in $(seq 40); do
+            if curl -fsS http://127.0.0.1/version | jq -e --arg tag "$PREV_TAG" '.image_tag == $tag' >/dev/null; then
+              ms=$(( ($(date +%s%N) - start) / 1000000 ))
+              echo "rolled back $LIVE -> $PREV ($PREV_TAG): riders on it ${ms} ms after the switch" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 0.25
+          done
+          echo "live traffic still not on $PREV_TAG 10 s after the switch" >&2
+          exit 1
+
+      - name: Status
+        if: always()
+        run: deploy/web.sh status | tee -a "$GITHUB_STEP_SUMMARY"
