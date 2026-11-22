@@ -1,9 +1,42 @@
 # Service level objectives for the ride app (S5, decision 013). rules/slo.rules.yaml computes them.
 # One entry per SLO: what's measured (the SLI, from contracts/metrics.yaml), the objective, why that
 # number, and the alert that tells you it's being missed.
+#
+# Drafted by agent from the choices in decision 013: rewrite each `why` in your own words.
 slos:
   - name: predict-availability
-    sli:
-    objective:
-    why:
-    alert:
+    sli: >-
+      Share of POST /predict the app answered without a 5xx:
+      lab_http_requests_total{route="/predict"}, bad = code=~"5..". Recorded as slo:predict_errors:ratio_rate*.
+    objective: 99%
+    why: >-
+      One app host with no redundancy, a blue-green switch per deploy and a lab session that ends every
+      four hours: 99% leaves room for those without paging, and still pages for anything a rider would
+      call an outage. The fallback already turns most serving failures into a 200, so a 5xx here means the
+      app itself is broken. Blind spot: requests that never reach the app (Traefik with no healthy colour)
+      aren't counted, and with no traffic there is no ratio at all.
+    alert: PredictAvailabilityFastBurn (14.4x over 1h and 5m), PredictAvailabilitySlowBurn (6x over 6h and 30m)
+
+  - name: predict-latency
+    sli: >-
+      Share of POST /predict answered within 250 ms inside the app:
+      lab_http_request_duration_seconds{route="/predict"}, good = the le="0.25" bucket.
+      Recorded as slo:predict_slow:ratio_rate*.
+    objective: 99% under 250 ms
+    why: >-
+      The model itself takes about 3 ms at p95 (version 1's p95_latency_ms tag) and the S2 gate allows up
+      to 25 ms, so 250 ms is about the network hop to serving, its timeout and the host, not the model.
+      It's a bucket boundary in the contract, so the SLI is exact rather than interpolated.
+    alert: PredictLatencyFastBurn (14.4x over 1h and 5m), PredictLatencySlowBurn (6x over 6h and 30m)
+
+  - name: model-coverage
+    sli: >-
+      Share of quotes produced by a model rather than the static-median fallback:
+      lab_predictions_total, bad = source="fallback". Recorded as slo:predict_fallback:ratio_rate*.
+    objective: 99%
+    why: >-
+      A fallback quote is an HTTP 200 with a worse number (static-quote MAE 8.61 min against 3.96 for v1
+      on the 2024-04 holdout, decision 007), so neither a health check nor the availability SLO sees it.
+      The fallback is a safety net, not a normal state: more than 1% of quotes from it means serving is
+      down or has no champion.
+    alert: ModelCoverageFastBurn (14.4x over 1h and 5m), ModelCoverageSlowBurn (6x over 6h and 30m)

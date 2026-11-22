@@ -1,0 +1,81 @@
+# promtool unit tests for slo.rules.yaml (S5): an outage pages, a short spike doesn't.
+# Every scenario starts with an hour of healthy traffic (10 /predict per second, 600 per minute), so the
+# long windows aren't judging a series that has only just started.
+rule_files:
+  - slo.rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # The app answers 5xx to every /predict for 20 minutes: the fast burn pages, within about 10 minutes.
+  - interval: 1m
+    input_series:
+      - series: 'lab_http_requests_total{route="/predict",method="POST",code="200"}'
+        values: '0+600x60 36000x20'
+      - series: 'lab_http_requests_total{route="/predict",method="POST",code="500"}'
+        values: '0x60 0+600x20'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: PredictAvailabilityFastBurn
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: PredictAvailabilityFastBurn
+        exp_alerts:
+          - exp_labels: {severity: page, slo: predict-availability}
+            exp_annotations:
+              summary: /predict is answering 5xx fast enough to spend 2% of the month's error budget in an hour.
+
+  # A 3-minute spike of 5xx after an hour of healthy traffic: no page, now or later.
+  - interval: 1m
+    input_series:
+      - series: 'lab_http_requests_total{route="/predict",method="POST",code="200"}'
+        values: '0+600x60 36000x3 36000+600x30'
+      - series: 'lab_http_requests_total{route="/predict",method="POST",code="500"}'
+        values: '0x60 0+600x3 1800x30'
+    alert_rule_test:
+      - eval_time: 63m
+        alertname: PredictAvailabilityFastBurn
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: PredictAvailabilityFastBurn
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: PredictAvailabilitySlowBurn
+        exp_alerts: []
+
+  # serving-champion is down for 20 minutes: every quote is the fallback, still HTTP 200. The model
+  # coverage SLO pages; availability doesn't (no 5xx), which is why this SLO exists.
+  - interval: 1m
+    input_series:
+      - series: 'lab_predictions_total{source="model",alias="champion",version="1"}'
+        values: '0+600x60 36000x20'
+      - series: 'lab_predictions_total{source="fallback",alias="",version=""}'
+        values: '0x60 0+600x20'
+      - series: 'lab_http_requests_total{route="/predict",method="POST",code="200"}'
+        values: '0+600x80'
+    alert_rule_test:
+      - eval_time: 75m
+        alertname: ModelCoverageFastBurn
+        exp_alerts:
+          - exp_labels: {severity: page, slo: model-coverage}
+            exp_annotations:
+              summary: Riders are getting the static-median fallback instead of the model (fast burn, 1h and 5m).
+      - eval_time: 75m
+        alertname: PredictAvailabilityFastBurn
+        exp_alerts: []
+
+  # Slow answers: every /predict takes longer than 250 ms for 20 minutes (serving timing out, say). The
+  # latency SLO pages. (A quarter slow would take about 35 minutes to reach the 1h fast-burn threshold.)
+  - interval: 1m
+    input_series:
+      - series: 'lab_http_request_duration_seconds_bucket{route="/predict",method="POST",le="0.25"}'
+        values: '0+600x60 36000x20'
+      - series: 'lab_http_request_duration_seconds_count{route="/predict",method="POST"}'
+        values: '0+600x80'
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: PredictLatencyFastBurn
+        exp_alerts:
+          - exp_labels: {severity: page, slo: predict-latency}
+            exp_annotations:
+              summary: Too many /predict answers are slower than 250 ms (fast burn, 1h and 5m).
