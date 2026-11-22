@@ -31,6 +31,8 @@ At 256 every page is one chunk, so a chunk is always a whole policy with its tit
 
 Top-k 3 is a latency budget as much as a recall one: three chunks are about 33 s of prompt reading. On the first real question ("How much is the Harbor Line surcharge, and when does it apply?") the right page ranked first at cosine similarity 0.87, the next two at 0.70 and 0.66 (public TLC surcharges, airport fees), and generation took 43 s. The answer ($4.25, trips ending at Pier 76 or the Hudson Yards ferry landing, after the metered fare, not in the ETA, FIN-118) matched the page on every fact. Without the wiki, the same question got "I don't know" and a citation to a page that doesn't exist ("[Harbor Line Surcharge Policy]"): the system prompt stops the model inventing the fee, not inventing a source.
 
+The Langfuse trace of a second question ("What is the Blue Corridor uplift and when does it apply?", trace `01f36f537f9662047e0437dd85ebbbbc`) shows the cost of top-k 3 directly: the `retrieve` span returned `blue-corridor` (0.85), `glossary` (0.68) and `rider-faq` (0.61) in 42 ms, and the `chat` generation read 514 prompt tokens and wrote 95 in 41.2 s. The answer (12% added to quoted ETAs for trips starting or ending in the corridor, weekdays 16:00-19:00, zones 161, 230, 186 and 170) came from the first chunk; the other two were context the model had to read and ignore.
+
 Top-k 2 would save about 11 s, but a question worded far from its page's title (the glossary, the FAQ, the runbook all mention fees and ETAs) can push the right page to third; top-k 4 costs another 11 s for a fourth page that, with 16 short pages, is usually unrelated.
 
 ## What would show this was wrong
