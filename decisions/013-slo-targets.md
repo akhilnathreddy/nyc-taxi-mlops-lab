@@ -26,7 +26,21 @@ Availability and latency are what a health check can mostly see; model coverage 
 
 Two windows per alert so a short spike doesn't page and a real outage does (`observability/rules/slo.rules.test.yaml`): 3 minutes of 5xx after an hour of healthy traffic leaves the 1h ratio at 5%, under the 14.4% line, and nothing fires; 20 minutes of 5xx pages within about 10 minutes. The cost of that choice: a fast burn needs about 9 minutes of total failure before it fires, and a partial failure (25% slow) about 35 minutes.
 
-Evidence from the real alert (S5 step 5): `<break time, alert time, fix time>`.
+Evidence from the real alert (S5 step 5, 2026-11-22, `deploy/traffic.py` at 5 requests/s on the app host, `docker stop lab-serving-serving-champion-1` over SSM):
+
+| Time (UTC) | Event |
+| --- | --- |
+| 12:04:21 | Traffic starts: every quote from champion v1 |
+| 12:09:44 | **Break:** `serving-champion` stopped. Within about a minute every quote is the static-median fallback, still HTTP 200 |
+| 12:13:01 | `ModelCoverageFastBurn` pending (1h and 5m both above 14.4%) |
+| 12:14:35 | **Alert fires**, 4 min 51 s after the break (ruler evaluation every minute plus `for: 2m`) |
+| 12:14:46 | **Fix:** `serving-champion` started |
+| 12:14:57 | `/predict` from outside answers with champion v1 again (11 s after the start) |
+| 12:21:47 | `ModelCoverageFastBurn` resolved, once the 5m window was clean |
+
+Over the run: 5,272 requests, all HTTP 200; 3,719 answered by champion v1 and 1,553 (29%) by the fallback. The availability and latency alerts stayed quiet, as they should: nothing was a 5xx or slow, only wrong. `ModelCoverageSlowBurn` fired too (12:17) and stays firing until the outage leaves its 30m window, about 30 minutes after the fix.
+
+The 4 min 51 s is faster than steady traffic would give: the traffic had only run 5 minutes before the break, so the 1h window held 10 minutes of data and crossed 14.4% sooner. With an hour of healthy traffic before it, the same outage takes about 9 minutes to page (the promtool test's case).
 
 ## What would show this was wrong
 
