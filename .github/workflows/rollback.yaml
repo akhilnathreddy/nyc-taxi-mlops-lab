@@ -11,7 +11,7 @@ on:
 permissions:
   contents: read
 
-# Shared with cd.yaml and promote.yaml: one change to the app host at a time.
+# Shared with cd.yaml: one change to which colour is live at a time.
 concurrency:
   group: cd-app
   cancel-in-progress: false
@@ -30,9 +30,7 @@ jobs:
           prev=$([[ $live == blue ]] && echo green || echo blue)
           tag=$(deploy/web.sh tag "$prev")
           [[ $tag != none ]] || { echo "$prev isn't running an app: nothing to roll back to" >&2; exit 1; }
-          echo "LIVE=$live" >> "$GITHUB_ENV"
-          echo "PREV=$prev" >> "$GITHUB_ENV"
-          echo "PREV_TAG=$tag" >> "$GITHUB_ENV"
+          { echo "LIVE=$live"; echo "PREV=$prev"; echo "PREV_TAG=$tag"; } >> "$GITHUB_ENV"
           echo "live: $live ($(deploy/web.sh tag "$live")), rolling back to $prev ($tag)"
 
       - name: Smoke test the previous colour

@@ -1,0 +1,85 @@
+# Promotion (S3): make a version the champion. The only place `champion` moves (contracts/mlflow.yaml).
+# The job runs in the `production` environment, so it waits for a required reviewer's approval before it
+# touches anything. Then, on the app host's runner:
+#   1. deploy/promote.py: refuse a version the pipeline didn't evaluate, record the outgoing champion
+#      (registered-model tag previous_champion), move the alias, tag the new version with who and when.
+#   2. deploy/web.sh reload champion: serving swaps models in place, the old one answering until the new
+#      one has loaded (decisions/010), so riders never fall back to the static median meanwhile.
+#   3. /predict through the live colour answers with alias champion and the promoted version.
+#
+#   gh workflow run promote.yaml                    # the current challenger
+#   gh workflow run promote.yaml -f version=3       # a version you name (e.g. S8's model rollback)
+#
+# workflow_dispatch only, so a fork's pull request can never reach the self-hosted runner.
+name: promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Model version to promote (empty: the current challenger)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# Its own group, not cd-app: a run waiting for approval must not hold up app deploys or rollbacks.
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: [self-hosted, lab-app]
+    environment: production
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ inputs.version }}
+      MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+      PROMOTED_BY: ${{ github.actor }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Check the input
+        run: |
+          [[ -z $VERSION || $VERSION =~ ^[0-9]+$ ]] || { echo "version must be a number, got '$VERSION'" >&2; exit 1; }
+
+      - name: Move champion and record the outgoing one
+        # The serving image already has MLflow and runs on this host: no extra install, no pull.
+        run: |
+          image=$(docker inspect lab-serving-serving-champion-1 --format '{{.Config.Image}}')
+          docker run --rm --network lab -e MLFLOW_TRACKING_URI -e VERSION -e PROMOTED_BY -e RUN_URL \
+            -v "$PWD/deploy/promote.py:/promote.py:ro" --entrypoint python "$image" /promote.py > promote.json
+          cat promote.json
+          {
+            echo "NEW_VERSION=$(jq -r .version promote.json)"
+            echo "OUTGOING=$(jq -r '.outgoing // "none"' promote.json)"
+          } >> "$GITHUB_ENV"
+
+      - name: Serving picks up the new champion
+        run: |
+          deploy/web.sh reload champion | tee reload.json
+          jq -e --arg v "$NEW_VERSION" '.alias == "champion" and .version == $v' reload.json
+
+      - name: /predict answers with the new champion
+        # Traefik health-checks serving on /model every 5 s; the app falls back to the static median until
+        # serving-champion is marked healthy, so allow a few rounds.
+        run: |
+          for _ in $(seq 30); do
+            out=$(curl -fsS -m 5 -H 'Content-Type: application/json' http://127.0.0.1/predict \
+              -d '{"pickup_zone_id": 132, "dropoff_zone_id": 230, "pickup_datetime": "2024-03-08T17:05:00"}' || true)
+            if jq -e --arg v "$NEW_VERSION" '.model.alias == "champion" and .model.version == $v' <<<"$out" >/dev/null 2>&1; then
+              echo "/predict: $out"
+              echo "champion v$OUTGOING -> v$NEW_VERSION, /predict: $out" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "/predict still not answering with champion v$NEW_VERSION: $out" >&2
+          exit 1
+
+      - name: Status
+        if: always()
+        run: deploy/web.sh status | tee -a "$GITHUB_STEP_SUMMARY"

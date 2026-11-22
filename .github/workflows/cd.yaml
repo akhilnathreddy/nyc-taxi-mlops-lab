@@ -31,7 +31,7 @@ permissions:
   contents: read
   packages: read
 
-# Shared with rollback.yaml and promote.yaml: one change to the app host at a time.
+# Shared with rollback.yaml: one change to which colour is live at a time.
 concurrency:
   group: cd-app
   cancel-in-progress: false
@@ -73,13 +73,13 @@ jobs:
           deploy/web.sh prepare
           live=$(deploy/web.sh live)
           idle=$([[ $live == blue ]] && echo green || echo blue)
-          echo "LIVE=$live" >> "$GITHUB_ENV"
-          echo "IDLE=$idle" >> "$GITHUB_ENV"
-          # Compose reads both colours' tags: keep the live one on the image it runs now.
-          if [[ $live != none ]]; then
-            echo "${live^^}_TAG=$(deploy/web.sh tag "$live")" >> "$GITHUB_ENV"
-          fi
-          echo "${idle^^}_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+          {
+            echo "LIVE=$live"
+            echo "IDLE=$idle"
+            # Compose reads both colours' tags: keep the live one on the image it runs now.
+            if [[ $live != none ]]; then echo "${live^^}_TAG=$(deploy/web.sh tag "$live")"; fi
+            echo "${idle^^}_TAG=$IMAGE_TAG"
+          } >> "$GITHUB_ENV"
           echo "live: $live, deploying $IMAGE_TAG to $idle"
 
       - name: Deploy to the idle colour
