@@ -24,8 +24,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Image tag to deploy to the idle colour, e.g. sha-1a2b3c4"
-        required: true
+        description: "Image tag to deploy to the idle colour, e.g. sha-1a2b3c4 (empty: this commit's)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -56,7 +57,8 @@ jobs:
 
       - name: Image tag
         run: |
-          tag=${INPUT_TAG:-sha-${HEAD_SHA::7}}
+          sha=${HEAD_SHA:-$GITHUB_SHA}  # a hand run without a tag deploys the commit it runs on
+          tag=${INPUT_TAG:-sha-${sha::7}}
           [[ $tag =~ ^sha-[0-9a-f]{7}$ ]] || { echo "not a sha-<7 hex> tag: $tag" >&2; exit 1; }
           echo "IMAGE_TAG=$tag" >> "$GITHUB_ENV"
           echo "IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
