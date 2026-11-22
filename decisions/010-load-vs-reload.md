@@ -20,7 +20,7 @@ A promotion is supposed to be invisible to riders except for better quotes. With
 
 The alias still decides what serving answers with, not a version number in a config file: a container that restarts for any other reason (Start Lab, a crash, a serving deploy) loads whatever `champion` points at, so the two paths can't disagree for long.
 
-Evidence from the first promotion (run `<promote run>`): `/reload` answered `<reload JSON>`; `/predict` answered with champion v`<N>` `<seconds>` s after the reload.
+Evidence from the first promotion (run 44996499177, waited for my approval in `production`): the alias moved from none to v1 (MAE 3.6376 against the baseline's 3.9563, p95 3.23 ms), and `/predict` from outside answered `{"duration_minutes": 64.19, "model": {"name": "trip-duration", "version": "1", "alias": "champion"}}`. `/reload` answered `{"version": "1", "previous_version": "1", "changed": false}`: `serving-champion` had already loaded v1 by itself between the alias moving and the reload call. So a container that has no model yet keeps trying the alias without being told to. Once a champion is loaded, only `/reload` (or a restart) changes it. The reload step is what makes the swap happen when the promotion runs instead of whenever the container next looks. S8's second promotion is where `changed: true` gets tested for real.
 
 ## What would show this was wrong
 

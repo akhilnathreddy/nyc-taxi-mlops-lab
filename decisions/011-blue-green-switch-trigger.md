@@ -20,7 +20,7 @@ Wait for approval: the switch job runs in an environment with me as required rev
 
 <!-- Draft from the evidence below: rewrite in your own words, as for 004–006. -->
 
-Code already passed review and CI before it reaches `main`; a second approval at deploy time would mostly be me clicking through the same `/version` and `/predict` the smoke test already checks. What the switch needs to protect against is a colour that doesn't start or doesn't answer, and those are exactly what the checks catch. Because the old colour is still running, a bad switch costs one `rollback.yaml` run, measured at `<rollback ms>` ms from switch to riders on the old version (run `<rollback run>`), not a redeploy. The model has its own human gate (`promote.yaml`, record 010), so automatic app deploys never change which model riders get.
+Code already passed review and CI before it reaches `main`; a second approval at deploy time would mostly be me clicking through the same `/version` and `/predict` the smoke test already checks. What the switch needs to protect against is a colour that doesn't start or doesn't answer, and those are exactly what the checks catch. Because the old colour is still running, a bad switch costs one `rollback.yaml` run, measured at 3.2 s from switch to riders on the old version (run 44996894203, green to blue; 2.6 s back again in run 44996920751), not a redeploy. The model has its own human gate (`promote.yaml`, record 010), so automatic app deploys never change which model riders get.
 
 Evidence from the first deploy (run 44996417282): blue was healthy 11 s after it started, the smoke test passed, and riders were on it about 2 s after the switch.
 
