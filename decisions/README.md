@@ -18,3 +18,5 @@ One record per decision point, from [000-template.md](000-template.md): the choi
 | 012 | S4 | What to automate in a restore | *to write* |
 | [013](013-slo-targets.md) | S5 | SLO targets | 99% each: /predict without 5xx, under 250 ms, from a model (not the fallback); multi-window burn-rate pages |
 | [014](014-series-budget.md) | S5 | Series budget | Lean keep list per source, no per-deploy labels; under 2,000 active series (426 after 3 deploys) |
+| [015](015-chunking-and-top-k.md) | S6 | Chunk size, overlap and top-k | 256 tokens, no overlap (one chunk per page today), top-k 3 |
+| [016](016-hnsw-or-ivfflat.md) | S6 | HNSW or IVFFlat | IVFFlat, 1 list (exact at 16 chunks), built after embedding |
