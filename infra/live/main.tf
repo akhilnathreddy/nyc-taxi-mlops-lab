@@ -82,3 +82,11 @@ module "grafana_secret" {
   name        = "lab/grafana"
   description = "Grafana Cloud Prometheus remote write for Alloy (keys: url, user, token)"
 }
+
+# S6: Langfuse tracing for the assistant (deploy/web.sh prepare copies it into the app's /secrets).
+# Value put from the laptop, never through Terraform or GitHub.
+module "langfuse_secret" {
+  source      = "../modules/secret"
+  name        = "lab/langfuse"
+  description = "Langfuse project keys for the assistant's traces (keys: host, public_key, secret_key)"
+}

@@ -49,6 +49,7 @@ jobs:
     env:
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       INPUT_TAG: ${{ inputs.tag }}
+      LLM_HOST: ${{ vars.LLM_HOST }}  # S6: the assistant's chat and embedding servers (compose.web.yaml)
     steps:
       - uses: actions/checkout@v7.0.1
         with:
