@@ -10,6 +10,6 @@ One record per decision point, from [000-template.md](000-template.md): the choi
 | [004](004-copy-vs-spectrum.md) | S1 | COPY vs Spectrum | COPY each month, idempotent per month |
 | [005](005-dist-and-sort-keys.md) | S1 | Dist and sort keys | AUTO distribution; sort by `source_file` (raw) and `pickup_at` (staging); `taxi_zones` ALL |
 | [006](006-blocking-vs-warning.md) | S1 | Blocking vs warning | Integrity blocks, anomalies warn, thresholds from 2024-01..04 |
-| 007 | S2 | What stays in the notebook | *to write* |
+| [007](007-notebook-vs-pipeline.md) | S2 | What stays in the notebook | Notebook explores and experiments on samples; pipeline trains, judges, registers, and records each month's duration percentiles and static-quote MAE |
 | [008](008-promotion-metric-and-margin.md) | S2 | Promotion metric and margin | MAE ≥ 2% better than the incumbent, no slice > 5% worse, p95 ≤ 25 ms |
 | [009](009-training-window.md) | S2 | Training window | Latest month is the holdout; every earlier month trains |
