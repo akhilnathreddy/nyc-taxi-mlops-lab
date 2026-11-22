@@ -13,3 +13,5 @@ One record per decision point, from [000-template.md](000-template.md): the choi
 | [007](007-notebook-vs-pipeline.md) | S2 | What stays in the notebook | Notebook explores and experiments on samples; pipeline trains, judges, registers, and records each month's duration percentiles and static-quote MAE |
 | [008](008-promotion-metric-and-margin.md) | S2 | Promotion metric and margin | MAE ≥ 2% better than the incumbent, no slice > 5% worse, p95 ≤ 25 ms |
 | [009](009-training-window.md) | S2 | Training window | Latest month is the holdout; every earlier month trains |
+| [010](010-load-vs-reload.md) | S3 | Load at start-up or reload on alias change | Reload in place, called by the approval-gated `promote.yaml`; any pipeline-evaluated version can be promoted |
+| [011](011-blue-green-switch-trigger.md) | S3 | What triggers the blue-green switch | Automatic, after the Docker health check, `/healthz` through Traefik and the smoke test pass |
